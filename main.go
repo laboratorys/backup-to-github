@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 )
 
@@ -28,24 +30,47 @@ var dataDir = os.Getenv("BAK_DATA_DIR")
 var proxy = os.Getenv("BAK_PROXY")
 var SPEC = os.Getenv("BAK_CRON")
 var maxCount = os.Getenv("BAK_MAX_COUNT")
+var isLog = os.Getenv("BAK_LOG")
+var branch = os.Getenv("BAK_BRANCH")
 var tmpPath = os.TempDir()
 var cronManager = cron.New(cron.WithSeconds())
 
+const readmeTemplate = `# {{.Title}}
+
+**上一次更新：{{.LastUpdate}}**
+
+## 应用列表
+
+| {{range .Table.Headers}}{{.}} | {{end}}
+| {{range .Table.Headers}}---| {{end}}
+{{range .Table.Rows}}| {{range .}}{{.}} | {{end}}
+{{end}}
+`
+
 func main() {
+	LogEnv()
 	//启动时自动还原数据
 	Restore()
 	//定时备份
 	CronTask()
-	go func() {
-		for {
-			time.Sleep(time.Second)
-		}
-	}()
+	defer cronManager.Stop()
 	select {}
+}
+func LogEnv() {
+	debugLog("BAK_REPO_OWNER：%s", owner)
+	debugLog("BAK_REPO：%s", repo)
+	debugLog("BAK_GITHUB_TOKEN：%s", "***********")
+	debugLog("BAK_APP_NAME：%s", appName)
+	debugLog("BAK_DATA_DIR：%s", dataDir)
+	debugLog("BAK_PROXY：%s", proxy)
+	debugLog("BAK_CRON：%s", SPEC)
+	debugLog("BAK_MAX_COUNT：%s", maxCount)
+	debugLog("BAK_LOG：%s", isLog)
+	debugLog("TMP_PATH：%s", tmpPath)
 }
 func CronTask() {
 	if SPEC == "" {
-		SPEC = "* */10 * * * *"
+		SPEC = "0 0/10 * * * ?"
 	}
 	cronManager.AddFunc(SPEC, func() {
 		Backup()
@@ -74,12 +99,25 @@ func Restore() {
 	if len(dirContents) > 0 {
 		//取最后一个文件
 		content := dirContents[len(dirContents)-1]
+		debugLog("Get Last Backup File: %s， Size: %d，Url: %s", content.GetPath(), content.GetSize(), content.GetDownloadURL())
 		url := content.GetDownloadURL()
 		//下载、解压文件
 		zipFilePath := filepath.Join(tmpPath, *content.Name)
 		DownloadFile(url, zipFilePath)
+		debugLog("DownloadFile: %s", zipFilePath)
 		Unzip(zipFilePath, dataDir)
 		os.Remove(zipFilePath)
+		debugLog("Unzip && Remove: %s", zipFilePath)
+	}
+}
+
+func debugLog(str string, v ...any) {
+	if isLog == "1" {
+		if v != nil {
+			log.Printf(str, v...)
+		} else {
+			log.Println(str)
+		}
 	}
 }
 
@@ -87,6 +125,7 @@ func Backup() {
 	ctx := context.Background()
 	fileName := time.Now().Format("200601021504" + ".zip")
 	zipFilePath := filepath.Join(tmpPath, fileName)
+	debugLog("Start Zip File: %s", zipFilePath)
 	Zip(dataDir, zipFilePath)
 	proxyURL, err := url.Parse(proxy)
 	if err != nil {
@@ -102,12 +141,75 @@ func Backup() {
 	if proxy == "" {
 		httpClient = nil
 	}
-	branch := "main"
+	if branch == "" {
+		branch = "main"
+	}
 	commitMessage := "Add File"
 	fileContent, _ := os.ReadFile(zipFilePath)
 	client := github.NewClient(httpClient).WithAuthToken(token)
+	AddOrUpdateFile(client, ctx, branch, appName+"/"+fileName, fileContent)
+	os.Remove(zipFilePath)
+	//查询仓库中备份文件数量
+	count, err := strconv.Atoi(maxCount)
+	if err != nil {
+		count = 30
+	}
+	_, dirContents, _, _ := client.Repositories.GetContents(ctx, owner, repo, appName, &github.RepositoryContentGetOptions{Ref: branch})
+	commitMessage = "clean file"
+	if len(dirContents) > count {
+		client.Repositories.DeleteFile(ctx, owner, repo, *dirContents[0].Path, &github.RepositoryContentFileOptions{
+			Message: &commitMessage,
+			SHA:     dirContents[0].SHA,
+			Branch:  &branch,
+		})
+	}
+	_, dirContents, _, _ = client.Repositories.GetContents(ctx, owner, repo, "", &github.RepositoryContentGetOptions{Ref: branch})
+	rows := [][]string{}
+	if len(dirContents) > 0 {
+		i := 0
+		for _, dc := range dirContents {
+			if dc.GetType() == "dir" {
+				commits, _, _ := client.Repositories.ListCommits(ctx, owner, repo, &github.CommitsListOptions{
+					Path: dc.GetPath(),
+					ListOptions: github.ListOptions{
+						PerPage: 1,
+					},
+				})
+				commitDate := commits[0].GetCommit().GetAuthor().GetDate()
+				_, dcs, _, _ := client.Repositories.GetContents(ctx, owner, repo, dc.GetPath(), &github.RepositoryContentGetOptions{Ref: branch})
+				row := []string{}
+				row = append(row,
+					fmt.Sprintf("%d", i+1),
+					dc.GetName(),
+					chineseTimeStr(commitDate.Time),
+					fmt.Sprintf("[%s](%s)", dcs[len(dcs)-1].GetName(), dcs[len(dcs)-1].GetDownloadURL()))
+				rows = append(rows, row)
+			}
+		}
+	}
+	if len(rows) > 0 {
+		readmeContent := ReadmeData{
+			Title:      repo,
+			LastUpdate: chineseTimeStr(time.Now()),
+			Table: TableData{
+				Headers: []string{"序号", "应用名称", "更新时间", "最近一次备份"},
+				Rows:    rows,
+			},
+		}
+		tmpl, _ := template.New("readme").Parse(readmeTemplate)
+		var buf bytes.Buffer
+		err = tmpl.Execute(&buf, readmeContent)
+		if err != nil {
+			panic(err)
+		}
+		readmeStr := buf.String()
+		debugLog(readmeStr)
+		AddOrUpdateFile(client, ctx, branch, "README.md", []byte(readmeStr))
+	}
+}
+func AddOrUpdateFile(client *github.Client, ctx context.Context, branch, filePath string, fileContent []byte) {
 	newFile := false
-	fc, _, _, err := client.Repositories.GetContents(ctx, owner, repo, appName+"/"+fileName, &github.RepositoryContentGetOptions{Ref: branch})
+	fc, _, _, err := client.Repositories.GetContents(ctx, owner, repo, filePath, &github.RepositoryContentGetOptions{Ref: branch})
 	if err != nil {
 		responseErr, ok := err.(*github.ErrorResponse)
 		if !ok || responseErr.Response.StatusCode != 404 {
@@ -117,39 +219,25 @@ func Backup() {
 		}
 	}
 	currentSHA := ""
+	commitMessage := fmt.Sprintf("Add file: %s", filePath)
 	if !newFile {
 		currentSHA = *fc.SHA
-		commitMessage = "Update file"
-		_, _, err = client.Repositories.UpdateFile(ctx, owner, repo, appName+"/"+fileName, &github.RepositoryContentFileOptions{
+		commitMessage = fmt.Sprintf("Update file: %s", filePath)
+		_, _, err = client.Repositories.UpdateFile(ctx, owner, repo, filePath, &github.RepositoryContentFileOptions{
 			Message: &commitMessage,
 			SHA:     &currentSHA,
 			Content: fileContent,
 			Branch:  &branch,
 		})
 	} else {
-		_, _, err = client.Repositories.CreateFile(ctx, owner, repo, appName+"/"+fileName, &github.RepositoryContentFileOptions{
+		_, _, err = client.Repositories.CreateFile(ctx, owner, repo, filePath, &github.RepositoryContentFileOptions{
 			Message: &commitMessage,
 			Content: fileContent,
 			Branch:  &branch,
 		})
 	}
 	if err != nil {
-		log.Fatal(err)
-	}
-	os.Remove(zipFilePath)
-	//查询仓库中备份文件数量
-	count, err := strconv.Atoi(maxCount)
-	if err != nil {
-		count = 30
-	}
-	_, dirContents, _, _ := client.Repositories.GetContents(ctx, owner, repo, appName, nil)
-	commitMessage = "clean file"
-	if len(dirContents) > count {
-		client.Repositories.DeleteFile(ctx, owner, repo, *dirContents[0].Path, &github.RepositoryContentFileOptions{
-			Message: &commitMessage,
-			SHA:     dirContents[0].SHA,
-			Branch:  &branch,
-		})
+		log.Println(err)
 	}
 }
 
@@ -163,7 +251,7 @@ func DownloadFile(downUrl, filePath string) {
 		InsecureSkipVerify: true,
 	}}
 
-	proxyUrl, err := url.Parse(os.Getenv("BAK_PROXY"))
+	proxyUrl, err := url.Parse(proxy)
 	if err == nil { // 使用传入代理
 		tr.Proxy = http.ProxyURL(proxyUrl)
 	}
@@ -279,4 +367,26 @@ func unzipFile(file *zip.File, dstDir string) error {
 	// save the decompressed file content
 	_, err = io.Copy(w, rc)
 	return err
+}
+
+type TableData struct {
+	Headers []string
+	Rows    [][]string
+}
+
+type ReadmeData struct {
+	Title      string
+	LastUpdate string
+	Table      TableData
+}
+
+func chineseTimeStr(t time.Time) string {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		fmt.Println("Error loading location:", err)
+		return ""
+	}
+	currentTime := t.In(loc)
+	formattedTime := currentTime.Format("2006-01-02 15:04:05")
+	return formattedTime
 }

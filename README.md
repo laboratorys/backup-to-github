@@ -5,13 +5,15 @@
 3. 定时备份数据到GitHub仓库
 4. 容器重启时还原最近一次数据备份。
 ### 环境变量
-| 变量名              | 是否必填 | 说明                          | 示例                     |
-|------------------|------|-----------------------------|------------------------|
-| BAK_APP_NAME     | 是    | 备份应用名称，用于区分不同应用的备份数据        | uptime                 |
-| BAK_DATA_DIR     | 是    | 计划备份的应用程序数据目录               | /app/data              |
-| BAK_GITHUB_TOKEN | 是    | 备份github账号的`access_token`   |                        |
-| BAK_PROXY        | 否    | 备份代理，无网络问题无需设置此项            | http://localhost:10809 |
-| BAK_REPO         | 是    | 备份仓库名称                      | xxx_repo               |
-| BAK_REPO_OWNER   | 是    | 备份仓库拥有者                     | xxx                    |
-| BAK_CRON         | 否    | 定时备份数据，默认值：  * */10 * * * * |                        |
-| BAK_MAX_COUNT    | 否    | 备份文件在仓库中保留的最大数量，默认：30       | 30                     |
+| 变量名                | 是否必填 | 说明                          | 示例                     |
+|--------------------|------|-----------------------------|------------------------|
+| BAK_APP_NAME       | 是    | 备份应用名称，用于区分不同应用的备份数据        | uptime                 |
+| BAK_DATA_DIR       | 是    | 计划备份的应用程序数据目录               | /app/data              |
+| BAK_GITHUB_TOKEN   | 是    | 备份github账号的`access_token`   |                        |
+| BAK_PROXY          | 否    | 备份代理，无网络问题无需设置此项            | http://localhost:10809 |
+| BAK_REPO           | 是    | 备份仓库名称                      | xxx_repo               |
+| BAK_REPO_OWNER     | 是    | 备份仓库拥有者                     | xxx                    |
+| BAK_CRON           | 否    | 定时备份数据，默认值：  0 0/10 * * * ? |                        |
+| BAK_MAX_COUNT      | 否    | 备份文件在仓库中保留的最大数量，默认：30       | 30                     |
+| BAK_LOG            | 否    | 开启日志，用于调试                   | 1                      |
+| BAK_BRANCH         | 否    | 备份仓库对应分支，默认：main            | main                   |
