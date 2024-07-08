@@ -243,20 +243,24 @@ func AddOrUpdateFile(client *github.Client, ctx context.Context, branch, filePat
 
 func DownloadFile(downUrl, filePath string) {
 
+	tr := &http.Transport{TLSClientConfig: &tls.Config{
+		InsecureSkipVerify: true,
+	}}
+	if proxy != "" {
+		proxyUrl, err := url.Parse(proxy)
+		if err == nil {
+			tr.Proxy = http.ProxyURL(proxyUrl)
+		}
+	}
+
+	// 创建一个带有自定义 Transport 的 Client
+	client := &http.Client{Transport: tr}
+
 	req, err := http.NewRequest(http.MethodGet, downUrl, nil)
 	if err != nil {
 		fmt.Println(err)
 	}
-	tr := &http.Transport{TLSClientConfig: &tls.Config{
-		InsecureSkipVerify: true,
-	}}
-
-	proxyUrl, err := url.Parse(proxy)
-	if err == nil { // 使用传入代理
-		tr.Proxy = http.ProxyURL(proxyUrl)
-	}
-
-	r, err := (&http.Client{Transport: tr}).Do(req)
+	r, err := client.Do(req)
 	if err != nil {
 		fmt.Println(err)
 	}
