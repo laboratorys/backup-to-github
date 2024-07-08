@@ -1,5 +1,5 @@
 ## backup-to-github
-### 功能说明
+### 特性
 1. 主要是针对一些云容器在重启后，数据会丢失的低成本解决方案，尤其是很多基于sqlite的应用。
 2. 适用范围：数据实时性要求没那么高的场景。
 3. 定时备份数据到GitHub仓库
@@ -17,3 +17,31 @@
 | BAK_MAX_COUNT      | 否    | 备份文件在仓库中保留的最大数量，默认：30       | 30                     |
 | BAK_LOG            | 否    | 开启日志，用于调试                   | 1                      |
 | BAK_BRANCH         | 否    | 备份仓库对应分支，默认：main            | main                   |
+### 使用
+以Uptime Kuma的Dockerfile作为示例
+```
+FROM alpine AS builder
+RUN apk add --no-cache nodejs npm git curl jq tar libc6-compat
+
+RUN npm install npm -g
+
+RUN adduser -D app
+USER app
+WORKDIR /home/app
+
+ARG CACHEBUST=1
+RUN LATEST_RELEASE_URL=$(curl -s https://api.github.com/repos/laboratorys/backup-to-github/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-amd64.tar.gz")) | .browser_download_url') \
+    && curl -L $LATEST_RELEASE_URL -o /tmp/backup-to-github.tar.gz \
+    && tar -xzf /tmp/backup-to-github.tar.gz -C $WORKDIR \
+    && rm /tmp/backup-to-github.tar.gz
+
+RUN git clone https://github.com/louislam/uptime-kuma.git
+WORKDIR /home/app/uptime-kuma
+RUN npm run setup
+
+EXPOSE 3001
+CMD ["sh", "-c", "nohup /home/app/backup2gh & node server/server.js"]
+```
+1. 为确保alpine镜像可以顺利执行`backup2gh`， 需要安装依赖`curl jq tar libc6-compat`，ubuntu等镜像不需要额外安装`libc6-compat`
+2. `ARG CACHEBUST=1`设置备份程序每次从release获取最新版本，不被缓存，避免使用BUG版本。`RUN LATEST_RELEASE_URL...`照抄即可
+3. CMD命令将备份程序执行在前，也可以使用`ENTRYPOINT`
