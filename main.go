@@ -123,7 +123,8 @@ func debugLog(str string, v ...any) {
 
 func Backup() {
 	ctx := context.Background()
-	fileName := time.Now().Format("200601021504" + ".zip")
+	chineseTimeStr(time.Now(), "200601021504")
+	fileName := chineseTimeStr(time.Now(), "200601021504") + ".zip"
 	zipFilePath := filepath.Join(tmpPath, fileName)
 	debugLog("Start Zip File: %s", zipFilePath)
 	Zip(dataDir, zipFilePath)
@@ -181,7 +182,7 @@ func Backup() {
 				row = append(row,
 					fmt.Sprintf("%d", i+1),
 					dc.GetName(),
-					chineseTimeStr(commitDate.Time),
+					chineseTimeStr(commitDate.Time, "2006-01-02 15:04:05"),
 					fmt.Sprintf("[%s](%s)", dcs[len(dcs)-1].GetName(), dcs[len(dcs)-1].GetDownloadURL()))
 				rows = append(rows, row)
 			}
@@ -190,7 +191,7 @@ func Backup() {
 	if len(rows) > 0 {
 		readmeContent := ReadmeData{
 			Title:      repo,
-			LastUpdate: chineseTimeStr(time.Now()),
+			LastUpdate: chineseTimeStr(time.Now(), "2006-01-02 15:04:05"),
 			Table: TableData{
 				Headers: []string{"序号", "应用名称", "更新时间", "最近一次备份"},
 				Rows:    rows,
@@ -384,9 +385,9 @@ type ReadmeData struct {
 	Table      TableData
 }
 
-func chineseTimeStr(t time.Time) string {
+func chineseTimeStr(t time.Time, layout string) string {
 	loc := time.FixedZone("UTC+8", 8*60*60)
 	currentTime := t.In(loc)
-	formattedTime := currentTime.Format("2006-01-02 15:04:05")
+	formattedTime := currentTime.Format(layout)
 	return formattedTime
 }
