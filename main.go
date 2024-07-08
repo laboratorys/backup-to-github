@@ -32,6 +32,7 @@ var SPEC = os.Getenv("BAK_CRON")
 var maxCount = os.Getenv("BAK_MAX_COUNT")
 var isLog = os.Getenv("BAK_LOG")
 var branch = os.Getenv("BAK_BRANCH")
+var delayRestore = os.Getenv("BAK_DELAY_RESTORE")
 var tmpPath = os.TempDir()
 var cronManager = cron.New(cron.WithSeconds())
 
@@ -49,7 +50,13 @@ const readmeTemplate = `# {{.Title}}
 
 func main() {
 	LogEnv()
-	//启动时自动还原数据
+	//启动时延时还原数据
+	if delayRestore == "" {
+		time.Sleep(1 * time.Minute)
+	} else {
+		delay, _ := strconv.Atoi(delayRestore)
+		time.Sleep(time.Duration(delay) * time.Minute)
+	}
 	Restore()
 	//定时备份
 	CronTask()
@@ -66,6 +73,8 @@ func LogEnv() {
 	debugLog("BAK_CRON：%s", SPEC)
 	debugLog("BAK_MAX_COUNT：%s", maxCount)
 	debugLog("BAK_LOG：%s", isLog)
+	debugLog("BAK_BRANCH：%s", branch)
+	debugLog("BAK_DELAY_RESTORE：%s", delayRestore)
 	debugLog("TMP_PATH：%s", tmpPath)
 }
 func CronTask() {
