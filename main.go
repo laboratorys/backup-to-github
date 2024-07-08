@@ -17,7 +17,6 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"text/template"
 	"time"
 )
@@ -50,10 +49,8 @@ const readmeTemplate = `# {{.Title}}
 
 func main() {
 	LogEnv()
-	//启动时延时还原数据
-	if delayRestore == "" {
-		time.Sleep(1 * time.Minute)
-	} else {
+	if delayRestore != "" {
+		//启动时延时还原数据
 		delay, _ := strconv.Atoi(delayRestore)
 		time.Sleep(time.Duration(delay) * time.Minute)
 	}
@@ -293,7 +290,6 @@ func DownloadFile(downUrl, filePath string) {
 
 // 打包成zip文件
 func Zip(src_dir string, zip_file_name string) {
-
 	// 预防：旧文件无法覆盖
 	os.RemoveAll(zip_file_name)
 
@@ -307,7 +303,6 @@ func Zip(src_dir string, zip_file_name string) {
 
 	// 遍历路径信息
 	filepath.Walk(src_dir, func(path string, info os.FileInfo, _ error) error {
-
 		// 如果是源路径，提前进行下一个遍历
 		if path == src_dir {
 			return nil
@@ -315,11 +310,12 @@ func Zip(src_dir string, zip_file_name string) {
 
 		// 获取：文件头信息
 		header, _ := zip.FileInfoHeader(info)
-		header.Name = strings.TrimPrefix(path, src_dir+`\`)
+		relPath, _ := filepath.Rel(src_dir, path)
+		header.Name = filepath.ToSlash(relPath)
 
 		// 判断：文件是不是文件夹
 		if info.IsDir() {
-			header.Name += `/`
+			header.Name += "/"
 		} else {
 			// 设置：zip的文件压缩算法
 			header.Method = zip.Deflate
