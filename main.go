@@ -381,11 +381,7 @@ type ReadmeData struct {
 }
 
 func chineseTimeStr(t time.Time) string {
-	loc, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		fmt.Println("Error loading location:", err)
-		return ""
-	}
+	loc := time.FixedZone("UTC+8", 8*60*60)
 	currentTime := t.In(loc)
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 	return formattedTime
