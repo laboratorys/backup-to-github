@@ -45,5 +45,5 @@ EXPOSE 3001
 CMD ["sh", "-c", "nohup /home/app/backup2gh & node server/server.js"]
 ```
 1. 为确保alpine镜像可以顺利执行`backup2gh`， 需要安装依赖`curl tar libc6-compat`，ubuntu等镜像不需要额外安装`libc6-compat`
-2. `ARG BAK_VERSION=1.5`设置备份程序版本，建议使用最新版。`RUN curl -L...`照抄即可
+2. `ARG BAK_VERSION=xx`设置备份程序版本，建议使用最新版。`RUN curl -L...`照抄即可
 3. CMD命令将备份程序执行在前，也可以使用`ENTRYPOINT`
