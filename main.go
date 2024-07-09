@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/avast/retry-go"
 	"github.com/google/go-github/v62/github"
 	"github.com/robfig/cron/v3"
 	"io"
@@ -79,7 +80,14 @@ func CronTask() {
 		SPEC = "0 0/10 * * * ?"
 	}
 	cronManager.AddFunc(SPEC, func() {
-		Backup()
+		retry.Do(
+			func() error {
+				return Backup()
+			},
+			retry.Delay(3*time.Second),
+			retry.Attempts(3),
+			retry.DelayType(retry.FixedDelay),
+		)
 	})
 	cronManager.Start()
 }
@@ -127,7 +135,7 @@ func debugLog(str string, v ...any) {
 	}
 }
 
-func Backup() {
+func Backup() error {
 	ctx := context.Background()
 	chineseTimeStr(time.Now(), "200601021504")
 	fileName := chineseTimeStr(time.Now(), "200601021504") + ".zip"
@@ -154,21 +162,30 @@ func Backup() {
 	commitMessage := "Add File"
 	fileContent, _ := os.ReadFile(zipFilePath)
 	client := github.NewClient(httpClient).WithAuthToken(token)
-	AddOrUpdateFile(client, ctx, branch, appName+"/"+fileName, fileContent)
+	err = AddOrUpdateFile(client, ctx, branch, appName+"/"+fileName, fileContent)
+	if err != nil {
+		return err
+	}
 	os.Remove(zipFilePath)
 	//查询仓库中备份文件数量
 	count, err := strconv.Atoi(maxCount)
 	if err != nil {
-		count = 30
+		count = 5
 	}
 	_, dirContents, _, _ := client.Repositories.GetContents(ctx, owner, repo, appName, &github.RepositoryContentGetOptions{Ref: branch})
 	commitMessage = "clean file"
 	if len(dirContents) > count {
-		client.Repositories.DeleteFile(ctx, owner, repo, *dirContents[0].Path, &github.RepositoryContentFileOptions{
-			Message: &commitMessage,
-			SHA:     dirContents[0].SHA,
-			Branch:  &branch,
-		})
+		for i, dc := range dirContents {
+			if i+1 <= len(dirContents)-count {
+				client.Repositories.DeleteFile(ctx, owner, repo, *dc.Path, &github.RepositoryContentFileOptions{
+					Message: &commitMessage,
+					SHA:     dc.SHA,
+					Branch:  &branch,
+				})
+			}
+
+		}
+
 	}
 	_, dirContents, _, _ = client.Repositories.GetContents(ctx, owner, repo, "", &github.RepositoryContentGetOptions{Ref: branch})
 	rows := [][]string{}
@@ -185,8 +202,9 @@ func Backup() {
 				commitDate := commits[0].GetCommit().GetAuthor().GetDate()
 				_, dcs, _, _ := client.Repositories.GetContents(ctx, owner, repo, dc.GetPath(), &github.RepositoryContentGetOptions{Ref: branch})
 				row := []string{}
+				i++
 				row = append(row,
-					fmt.Sprintf("%d", i+1),
+					fmt.Sprintf("%d", i),
 					dc.GetName(),
 					chineseTimeStr(commitDate.Time, "2006-01-02 15:04:05"),
 					fmt.Sprintf("[%s](%s)", dcs[len(dcs)-1].GetName(), dcs[len(dcs)-1].GetDownloadURL()))
@@ -213,8 +231,9 @@ func Backup() {
 		debugLog(readmeStr)
 		AddOrUpdateFile(client, ctx, branch, "README.md", []byte(readmeStr))
 	}
+	return nil
 }
-func AddOrUpdateFile(client *github.Client, ctx context.Context, branch, filePath string, fileContent []byte) {
+func AddOrUpdateFile(client *github.Client, ctx context.Context, branch, filePath string, fileContent []byte) error {
 	newFile := false
 	fc, _, _, err := client.Repositories.GetContents(ctx, owner, repo, filePath, &github.RepositoryContentGetOptions{Ref: branch})
 	if err != nil {
@@ -246,6 +265,7 @@ func AddOrUpdateFile(client *github.Client, ctx context.Context, branch, filePat
 	if err != nil {
 		log.Println(err)
 	}
+	return err
 }
 
 func DownloadFile(downUrl, filePath string) {

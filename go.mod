@@ -7,4 +7,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 )
 
-require github.com/google/go-querystring v1.1.0 // indirect
+require (
+	github.com/avast/retry-go v3.0.0+incompatible // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
+)
