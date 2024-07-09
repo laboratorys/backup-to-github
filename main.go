@@ -49,17 +49,20 @@ const readmeTemplate = `# {{.Title}}
 `
 
 func main() {
-	LogEnv()
-	if delayRestore != "" {
-		//启动时延时还原数据
-		delay, _ := strconv.Atoi(delayRestore)
-		time.Sleep(time.Duration(delay) * time.Minute)
+	if repo != "" && owner != "" && token != "" {
+		LogEnv()
+		if delayRestore != "" {
+			//启动时延时还原数据
+			delay, _ := strconv.Atoi(delayRestore)
+			time.Sleep(time.Duration(delay) * time.Minute)
+		}
+		Restore()
+		//定时备份
+		CronTask()
+		defer cronManager.Stop()
+		select {}
 	}
-	Restore()
-	//定时备份
-	CronTask()
-	defer cronManager.Stop()
-	select {}
+
 }
 func LogEnv() {
 	debugLog("BAK_REPO_OWNER：%s", owner)
