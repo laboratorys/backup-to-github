@@ -5,11 +5,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	crypto_rand "crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"github.com/avast/retry-go"
 	"github.com/google/go-github/v62/github"
 	"github.com/robfig/cron/v3"
+	"golang.org/x/crypto/nacl/box"
 	"io"
 	"log"
 	"net/http"
@@ -46,6 +49,43 @@ const readmeTemplate = `# {{.Title}}
 | {{range .Table.Headers}}---| {{end}}
 {{range .Table.Rows}}| {{range .}}{{.}} | {{end}}
 {{end}}
+`
+const clearHistoryWorkflowYml = `
+name: Clear Git History
+on:
+  schedule:
+    - cron: '10 22 * * *'
+  workflow_dispatch:
+jobs:
+  clear-history:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0  # Fetch all history for all branches and tags
+          token: ${{ secrets.PAT_TOKEN }}
+      - name: Get default branch
+        id: default_branch
+        run: echo "::set-output name=branch::$(echo ${GITHUB_REF#refs/heads/})"
+      - name: Remove git history
+        env:
+          DEFAULT_BRANCH: ${{ steps.default_branch.outputs.branch }}
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git checkout --orphan tmp
+          git add -A				# Add all files and commit them
+          git commit -m "Reset all files"
+          git branch -D $DEFAULT_BRANCH		# Deletes the default branch
+          git branch -m $DEFAULT_BRANCH		# Rename the current branch to defaul
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          force: true
+          branch: ${{ github.ref }}
+          github_token: ${{ secrets.PAT_TOKEN }}
 `
 
 func main() {
@@ -192,10 +232,14 @@ func Backup() error {
 	}
 	_, dirContents, _, _ = client.Repositories.GetContents(ctx, owner, repo, "", &github.RepositoryContentGetOptions{Ref: branch})
 	rows := [][]string{}
+	isFirstInit := true
 	if len(dirContents) > 0 {
 		i := 0
 		for _, dc := range dirContents {
-			if dc.GetType() == "dir" {
+			if dc.GetName() == ".github" {
+				isFirstInit = false
+			}
+			if dc.GetType() == "dir" && dc.GetName() != ".github" {
 				commits, _, _ := client.Repositories.ListCommits(ctx, owner, repo, &github.CommitsListOptions{
 					Path: dc.GetPath(),
 					ListOptions: github.ListOptions{
@@ -215,6 +259,7 @@ func Backup() error {
 			}
 		}
 	}
+	_, dirContents, _, _ = client.Repositories.GetContents(ctx, owner, repo, "", &github.RepositoryContentGetOptions{Ref: branch})
 	if len(rows) > 0 {
 		readmeContent := ReadmeData{
 			Title:      repo,
@@ -232,9 +277,56 @@ func Backup() error {
 		}
 		readmeStr := buf.String()
 		debugLog(readmeStr)
-		AddOrUpdateFile(client, ctx, branch, "README.md", []byte(readmeStr))
+		_ = AddOrUpdateFile(client, ctx, branch, "README.md", []byte(readmeStr))
+	}
+	if isFirstInit {
+		_ = AddOrUpdateFile(client, ctx, branch, ".github/workflows/clear-history.yml", []byte(clearHistoryWorkflowYml))
+		permissions := "read,write"
+		canApprovePullRequestReviews := false
+		_, _, _ = client.Repositories.EditDefaultWorkflowPermissions(ctx, owner, repo, github.DefaultWorkflowPermissionRepository{DefaultWorkflowPermissions: &permissions, CanApprovePullRequestReviews: &canApprovePullRequestReviews})
+		_ = addRepoSecret(ctx, client, owner, repo, "PAT_TOKEN", token)
 	}
 	return nil
+}
+func addRepoSecret(ctx context.Context, client *github.Client, owner string, repo, secretName string, secretValue string) error {
+	publicKey, _, err := client.Actions.GetRepoPublicKey(ctx, owner, repo)
+	if err != nil {
+		return err
+	}
+
+	encryptedSecret, err := encryptSecretWithPublicKey(publicKey, secretName, secretValue)
+	if err != nil {
+		return err
+	}
+
+	if _, err := client.Actions.CreateOrUpdateRepoSecret(ctx, owner, repo, encryptedSecret); err != nil {
+		return fmt.Errorf("Actions.CreateOrUpdateRepoSecret returned error: %v", err)
+	}
+
+	return nil
+}
+
+func encryptSecretWithPublicKey(publicKey *github.PublicKey, secretName string, secretValue string) (*github.EncryptedSecret, error) {
+	decodedPublicKey, err := base64.StdEncoding.DecodeString(publicKey.GetKey())
+	if err != nil {
+		return nil, fmt.Errorf("base64.StdEncoding.DecodeString was unable to decode public key: %v", err)
+	}
+
+	var boxKey [32]byte
+	copy(boxKey[:], decodedPublicKey)
+	encryptedBytes, err := box.SealAnonymous([]byte{}, []byte(secretValue), &boxKey, crypto_rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("box.SealAnonymous failed with error %w", err)
+	}
+
+	encryptedString := base64.StdEncoding.EncodeToString(encryptedBytes)
+	keyID := publicKey.GetKeyID()
+	encryptedSecret := &github.EncryptedSecret{
+		Name:           secretName,
+		KeyID:          keyID,
+		EncryptedValue: encryptedString,
+	}
+	return encryptedSecret, nil
 }
 func AddOrUpdateFile(client *github.Client, ctx context.Context, branch, filePath string, fileContent []byte) error {
 	newFile := false
