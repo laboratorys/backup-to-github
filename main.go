@@ -281,9 +281,10 @@ func Backup() error {
 	}
 	if isFirstInit {
 		_ = AddOrUpdateFile(client, ctx, branch, ".github/workflows/clear-history.yml", []byte(clearHistoryWorkflowYml))
-		permissions := "read,write"
-		canApprovePullRequestReviews := false
-		_, _, _ = client.Repositories.EditDefaultWorkflowPermissions(ctx, owner, repo, github.DefaultWorkflowPermissionRepository{DefaultWorkflowPermissions: &permissions, CanApprovePullRequestReviews: &canApprovePullRequestReviews})
+		input := &github.DefaultWorkflowPermissionRepository{
+			DefaultWorkflowPermissions: github.String("write"),
+		}
+		_, _, _ = client.Repositories.EditDefaultWorkflowPermissions(ctx, owner, repo, *input)
 		_ = addRepoSecret(ctx, client, owner, repo, "PAT_TOKEN", token)
 	}
 	return nil
