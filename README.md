@@ -17,7 +17,7 @@
 | BAK_MAX_COUNT     | 否    | 备份文件在仓库中保留的最大数量，默认：30       | 30                     |
 | BAK_LOG           | 否    | 开启日志，用于调试                   | 1                      |
 | BAK_BRANCH        | 否    | 备份仓库对应分支，默认：main            | main                   |
-| BAK_DELAY_RESTORE | 否    | 还原延迟，容器启动后延迟还原data          |                        |
+| BAK_DELAY_RESTORE | 否    | 还原延迟，容器启动后延迟还原data, 单位是分钟   | 1                      |
 ### 使用
 以Uptime Kuma的Dockerfile作为示例
 ```
@@ -30,7 +30,7 @@ RUN adduser -D app
 USER app
 WORKDIR /home/app
 
-ARG BAK_VERSION=1.8
+ARG BAK_VERSION=1.9
 ENV BAK_VERSION=${BAK_VERSION}
 RUN curl -L "https://github.com/laboratorys/backup-to-github/releases/download/v${BAK_VERSION}/backup2gh-v${BAK_VERSION}-linux-amd64.tar.gz" -o /tmp/backup-to-github.tar.gz \
     && cd $WORKDIR && tar -xzf /tmp/backup-to-github.tar.gz \
